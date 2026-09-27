@@ -72,6 +72,9 @@ Optional query parameters:
 
 - `kind` - only return events of a single kind
 - `meta_key` and `meta_value` - filter by an event `meta` key/value pair
+- `limit` - maximum number of events to return (default `100`, max `1000`)
+
+`meta_value` is parsed as a JSON scalar when possible, so `true` matches a boolean, `3` matches a number, and `%22text%22` (URL-encoded `"text"`) matches the literal string `"text"`.
 
 Examples:
 
@@ -80,6 +83,7 @@ GET /streams/orders-1/events
 GET /streams/orders-1/events?kind=placed
 GET /streams/orders-1/events?meta_key=tenant&meta_value=acme
 GET /streams/orders-1/events?kind=placed&meta_key=priority&meta_value=3
+GET /streams/orders-1/events?meta_key=literal&meta_value=%22true%22&limit=10
 ```
 
 ### `GET /health`

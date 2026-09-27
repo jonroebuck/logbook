@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use axum::Router;
 use axum::routing::{get, post};
+use axum::{Router, http::Method, http::header::CONTENT_TYPE};
 use eventsdb::sqlite::SqliteEventLog;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
@@ -14,7 +14,11 @@ pub fn router(log: Arc<SqliteEventLog>) -> Router {
             "/streams/{stream_id}/events",
             post(append_event).get(list_events),
         )
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers([CONTENT_TYPE]),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(AppState { log })
 }

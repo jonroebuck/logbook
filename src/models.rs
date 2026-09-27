@@ -32,6 +32,7 @@ pub struct ListEventsQuery {
     pub kind: Option<String>,
     pub meta_key: Option<String>,
     pub meta_value: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -75,10 +76,13 @@ fn take_string(event: &mut Map<String, Value>, field: &str) -> Result<String, St
 }
 
 fn take_object(event: &mut Map<String, Value>, field: &str) -> Result<Map<String, Value>, String> {
-    event
-        .remove(field)
-        .and_then(|value| value.as_object().cloned())
-        .ok_or_else(|| format!("missing or invalid `{field}` field"))
+    match event.remove(field) {
+        None => Ok(Map::new()),
+        Some(value) => value
+            .as_object()
+            .cloned()
+            .ok_or_else(|| format!("missing or invalid `{field}` field")),
+    }
 }
 
 fn take_u64(event: &mut Map<String, Value>, field: &str) -> Result<u64, String> {

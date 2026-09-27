@@ -17,6 +17,9 @@ use crate::models::{
     AppendEventRequest, ErrorResponse, EventResponse, HealthResponse, ListEventsQuery,
 };
 
+const DEFAULT_LIST_LIMIT: usize = 100;
+const MAX_LIST_LIMIT: usize = 1_000;
+
 #[derive(Clone)]
 pub struct AppState {
     pub log: Arc<SqliteEventLog>,
@@ -41,10 +44,14 @@ pub async fn list_events(
     Path(stream_id): Path<String>,
     Query(query): Query<ListEventsQuery>,
 ) -> Result<Json<Vec<EventResponse>>, AppError> {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .min(MAX_LIST_LIMIT);
     let filter = build_filter(stream_id, query)?;
     let events = state
         .log
-        .read_all(Position::BEGINNING, &filter, usize::MAX)
+        .read_all(Position::BEGINNING, &filter, limit)
         .await?;
     let response = events
         .into_iter()
@@ -238,6 +245,98 @@ mod tests {
         assert_eq!(json.as_array().unwrap().len(), 1);
         assert_eq!(json[0]["kind"], json!("placed"));
         assert_eq!(json[0]["meta"]["tenant"], json!("acme"));
+    }
+
+    #[tokio::test]
+    async fn parses_boolean_and_numeric_meta_filters() {
+        let app = app().await;
+
+        for payload in [
+            json!({ "kind": "noted", "meta": { "closed": true, "priority": 3 }, "data": {} }),
+            json!({ "kind": "noted", "meta": { "closed": false, "priority": 4 }, "data": {} }),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/streams/orders-4/events")
+                        .header("content-type", "application/json")
+                        .body(Body::from(payload.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get("/streams/orders-4/events?meta_key=closed&meta_value=true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+        assert_eq!(json[0]["meta"]["closed"], json!(true));
+
+        let response = app
+            .oneshot(
+                Request::get("/streams/orders-4/events?meta_key=priority&meta_value=3")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+        assert_eq!(json[0]["meta"]["priority"], json!(3));
+    }
+
+    #[tokio::test]
+    async fn supports_quoted_string_meta_filters_and_limits() {
+        let app = app().await;
+
+        for payload in [
+            json!({ "kind": "noted", "meta": { "literal": "true" }, "data": {} }),
+            json!({ "kind": "noted", "meta": { "literal": "true" }, "data": {} }),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post("/streams/orders-5/events")
+                        .header("content-type", "application/json")
+                        .body(Body::from(payload.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+
+        let response = app
+            .oneshot(
+                Request::get(
+                    "/streams/orders-5/events?meta_key=literal&meta_value=%22true%22&limit=1",
+                )
+                .body(Body::empty())
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+        assert_eq!(json[0]["meta"]["literal"], json!("true"));
     }
 
     #[tokio::test]
